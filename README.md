@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="plugins/agent-port/assets/logo.png" alt="Agent Port" width="180">
+</p>
+
 # Agent Port
 
 Move your Codex or Claude Code conversations and personal skills to another computer, while
