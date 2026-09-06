@@ -11,7 +11,7 @@ separately through Git or your usual file-transfer method.
 
 - Python 3.11 or newer and [uv](https://docs.astral.sh/uv/getting-started/installation/) or
   [pipx](https://pipx.pypa.io/stable/installation/).
-- The same Agent Port release on both computers.
+- A compatible Agent Port CLI installed on both computers.
 - Both computers on the same private network for direct transfer. You can also move an archive
   yourself and restore it offline.
 - Codex or Claude Code initialized on the new computer, with your project folders in place.
@@ -21,11 +21,11 @@ separately through Git or your usual file-transfer method.
 Install the CLI on both computers:
 
 ```bash
-uv tool install "agent-port==0.5.4"
+uv tool install agent-port
 agent-port --version
 ```
 
-Alternatively, use `pipx install "agent-port==0.5.4"`. If you downloaded the release wheel,
+Alternatively, use `pipx install agent-port`. If you downloaded the release wheel,
 use `uv tool install /path/to/agent_port-0.5.4-py3-none-any.whl`.
 
 Then install the plugin in the harness you use.

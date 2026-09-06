@@ -6,10 +6,10 @@ engine.
 
 ## Customer setup
 
-Install Python 3.11 or newer and the compatible CLI:
+Install Python 3.11 or newer and the CLI:
 
 ```bash
-uv tool install "agent-port>=0.5.4,<0.6"
+uv tool install agent-port
 agent-port --version
 ```
 
