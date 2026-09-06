@@ -36,7 +36,7 @@ def test_dual_plugin_manifests_and_marketplaces_share_identity() -> None:
     )
 
     assert codex["name"] == claude["name"] == "agent-port"
-    assert codex["version"] == claude["version"] == "0.5.4"
+    assert codex["version"] == claude["version"] == "0.5.5"
     assert codex_market["plugins"][0]["source"]["path"] == "./plugins/agent-port"
     assert claude_market["plugins"][0]["source"] == "./plugins/agent-port"
     assert claude_market["plugins"][0]["strict"] is True
@@ -114,7 +114,7 @@ def test_plugin_has_no_automatic_execution_components() -> None:
 
 def test_repository_plugin_validator_passes() -> None:
     validator = _load_tool("validate_plugins")
-    assert validator.validate() == "0.5.4"
+    assert validator.validate() == "0.5.5"
 
 
 def test_plugin_builder_is_reproducible_and_self_contained(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@ other migration operations. On a destination machine, the plugin asks for the te
 code and runs the receiver itself; users do not need to paste a receive command into a separate
 terminal. It does not convert sessions between harnesses.
 
-The plugin requires `agent-port>=0.5.4,<0.6` on `PATH`. It never installs the CLI automatically.
+The plugin requires `agent-port>=0.5.5,<0.6` on `PATH`. It never installs the CLI automatically.
 
 See the repository [README](https://github.com/AmanK-tech/agent-port#readme) for marketplace
 installation, security boundaries, and the old-machine/new-machine workflow.

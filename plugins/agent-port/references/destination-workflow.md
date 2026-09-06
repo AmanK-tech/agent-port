@@ -1,6 +1,6 @@
 # Destination-machine workflow
 
-1. Verify `agent-port` is `0.5.4` or newer in the `0.5.x` series. Do not discover commands with
+1. Verify `agent-port` is `0.5.5` or newer in the `0.5.x` series. Do not discover commands with
    `--help` or improvise after a usage error.
 2. Run `agent-port transfer prepare --format json`. Ask for the active pairing code as free-form
    input, write it with the harness file tool to the exact absolute `pairing_code_file` path, and
@@ -11,8 +11,9 @@
    inspect` or archive-targeted `skills inspect`.
 4. Create the auto-numbered plan with `agent-port restore plan ARCHIVE --destination HARNESS_HOME
    --destination-home DESTINATION_HOME --format json`. Treat exit code 1 plus `status: blocked` as
-   a valid saved plan. Present the suggested home-root mapping and only actual blockers or differing
-   eligible skills.
+   a valid saved plan. Present the suggested home-root mapping, any unique Git-clone project
+   mappings, and only actual blockers or differing eligible skills. Ask for approval before
+   accepting each suggested mapping.
 5. Regenerate after every approved decision. Never edit or dump plan JSON.
 6. Run `agent-port restore plan-info FINAL_PLAN --format json` and use only its final identifiers,
    mappings, operation counts, content counts, blockers, and skill policies.

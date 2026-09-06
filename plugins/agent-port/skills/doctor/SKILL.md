@@ -7,7 +7,7 @@ description: Validate a Codex or Claude Code destination or completed Agent Port
 
 Read [the safety contract](../../references/safety-contract.md).
 
-Run `agent-port --version` first and require `0.5.4` or newer in the `0.5.x` series. Use
+Run `agent-port --version` first and require `0.5.5` or newer in the `0.5.x` series. Use
 `agent-port doctor HARNESS_HOME --harness HARNESS --format json` with an explicit path. This
 workflow is read-only: do not repair files, apply
 a restore, register projects, delete run data, or roll back unless the user separately requests the

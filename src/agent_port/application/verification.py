@@ -125,6 +125,11 @@ class RestoreVerificationService:
                 }
             )
         if journal.rolled_back:
+            counts = RestoreVerificationCounts(
+                planned_operations=counts.planned_operations,
+                applied_operations=counts.applied_operations,
+                skipped_operations=counts.skipped_operations,
+            )
             diagnostics.append(
                 Diagnostic(
                     code="restore-rolled-back",
@@ -140,7 +145,7 @@ class RestoreVerificationService:
                     historical_valid,
                     False,
                     self._doctor(plan, checks, diagnostics),
-                    restart_required=result.restart_required,
+                    restart_required=False,
                     counts=counts,
                     checks=checks,
                     diagnostics=diagnostics,
@@ -171,11 +176,17 @@ class RestoreVerificationService:
         )
         if not counts.all_expected_verified:
             current_intact = False
+            mismatches = "; ".join(
+                f"{name.removeprefix('expected_')}: expected {expected}, "
+                f"verified {getattr(counts, name.replace('expected_', 'verified_', 1))}"
+                for name, expected in counts.model_dump().items()
+                if name.startswith("expected_")
+                and expected != getattr(counts, name.replace("expected_", "verified_", 1))
+            )
             diagnostics.append(
                 _error(
                     "incomplete-verification-counts",
-                    "Not every expected conversation, subagent transcript, transcript file, "
-                    "project, skill, and attachment was verified.",
+                    f"Restore content counts do not match ({mismatches}).",
                 )
             )
         destination_valid = self._doctor(plan, checks, diagnostics)
@@ -465,11 +476,19 @@ class RestoreVerificationService:
         }
         subagent_transcript_paths = transcript_paths.difference(main_transcript_paths)
         project_transcript_paths: dict[str, set[str]] = {}
+        claude = plan.archive.harness.value == "claude-code"
         for operation in plan.operations:
             if not operation.member or roles.get(operation.member) is not PayloadRole.TRANSCRIPT:
                 continue
-            project_sources = {operation.project_source} if operation.project_source else set()
-            if not project_sources:
+            if claude:
+                # Claude archives count native project containers, not distinct cwd
+                # values. A container may contain several working directories, and
+                # the same cwd may appear in more than one source container.
+                container = _claude_project_container(operation)
+                project_sources = {container} if container else set()
+            else:
+                project_sources = {operation.project_source} if operation.project_source else set()
+            if not project_sources and not claude:
                 retained_path = run_directory / "staged" / "archive" / operation.member
                 if retained_path.is_file():
                     project_sources = inspect_jsonl(
@@ -479,6 +498,16 @@ class RestoreVerificationService:
                 project_transcript_paths.setdefault(project_source, set()).add(
                     operation.destination
                 )
+        expected_project_keys = (
+            {
+                container
+                for operation in plan.operations
+                if operation.destination in main_transcript_paths
+                and (container := _claude_project_container(operation)) is not None
+            }
+            if claude
+            else {project.source for project in plan.projects}
+        )
         expected_skills = [
             operation
             for operation in plan.operations
@@ -502,7 +531,7 @@ class RestoreVerificationService:
                     "expected_conversations": len(conversation_paths),
                     "expected_transcript_files": len(transcript_paths),
                     "expected_subagent_transcripts": len(subagent_transcript_paths),
-                    "expected_projects": len(plan.projects),
+                    "expected_projects": len(expected_project_keys),
                 }
             )
         verified_conversations = sum(
@@ -521,12 +550,12 @@ class RestoreVerificationService:
                 ),
                 "verified_projects": (
                     sum(
-                        bool(project_transcript_paths.get(project.source))
+                        bool(project_transcript_paths.get(project))
                         and all(
                             path not in error_paths and Path(path).is_file()
-                            for path in project_transcript_paths[project.source]
+                            for path in project_transcript_paths[project]
                         )
-                        for project in plan.projects
+                        for project in expected_project_keys
                     )
                     if project_transcript_paths
                     else (
@@ -616,6 +645,23 @@ class RestoreVerificationService:
                 ).status
             except (OSError, ValidationError):
                 initial_status = RestoreVerificationState.FAILED
+        else:
+            result = result.model_copy(
+                update={
+                    "diagnostics": [
+                        *result.diagnostics,
+                        Diagnostic(
+                            code="initial-verification-unavailable",
+                            severity=Severity.WARNING,
+                            message=(
+                                "No closed-harness initial verification snapshot is retained for "
+                                "this run. Recorded apply checks cannot establish when later "
+                                "changes occurred."
+                            ),
+                        ),
+                    ]
+                }
+            )
         result = result.model_copy(
             update={
                 "initial_verification_status": initial_status,
@@ -833,6 +879,12 @@ def _is_main_transcript(
         return False
     parts = Path(operation.source).parts
     return len(parts) == 3 and parts[0] == "projects"
+
+
+def _claude_project_container(operation: PlannedOperation) -> str | None:
+    source = operation.source or (operation.member or "").removeprefix("native/sessions/")
+    parts = source.split("/")
+    return parts[1] if len(parts) >= 3 and parts[0] == "projects" else None
 
 
 def _infer_payload_role(operation: PlannedOperation) -> PayloadRole:

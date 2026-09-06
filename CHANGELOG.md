@@ -3,6 +3,33 @@
 All notable Agent Port changes are documented here. CLI and plugin versions are released in
 lockstep.
 
+## 0.5.5 - 2026-09-06
+
+### Added
+
+- Restore planning recognizes a unique cloned Git repository by a one-way origin fingerprint and
+  suggests the required source-to-destination project mapping when the folder path changed.
+
+### Fixed
+
+- Claude verification now counts source project containers consistently with the archive. Mixed
+  working directories and shared paths no longer trigger rollback after every transcript verifies.
+- Claude project folders are mapped from their native container identity instead of the last
+  working directory encountered. New plans also recover the correct identity from older archives.
+- Subagent transcripts are reconciled beneath their parent conversation, including repeated
+  restores and parents already stored in a different destination container.
+- Rolled-back runs now clear all expected content counts consistently while remaining explicitly
+  unsuccessful migrations. Count failures report the exact expected and verified values.
+- Verification reports missing initial evidence explicitly instead of leaving its absence unexplained.
+
+### Safety
+
+- Repository fingerprints are stored separately from the project inventory and never include
+  remote URLs or credentials. Ambiguous or non-Git matches remain blocked until the user supplies
+  an explicit mapping.
+- Restore and rollback now hold a process-level destination lock. Overlapping runs cannot prepare
+  conflicting rollback journals and delete each other's restored files.
+
 ## 0.5.4 - 2026-09-05
 
 ### Added

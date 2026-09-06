@@ -8,7 +8,7 @@ description: Plan and safely apply a same-harness Agent Port restore. Use when r
 Read [the safety contract](../../references/safety-contract.md), then follow
 [the destination workflow](../../references/destination-workflow.md).
 
-Run `agent-port --version` and require `0.5.4` or newer in the `0.5.x` series. Never apply an
+Run `agent-port --version` and require `0.5.5` or newer in the `0.5.x` series. Never apply an
 archive directly. Use only the canonical workflow commands; do not probe with `--help`, use shell
 pipelines, dump files, run `transfer inspect`, or run archive-targeted `skills inspect`.
 

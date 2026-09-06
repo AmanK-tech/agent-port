@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from agent_port.adapters.claude_code.paths import encode_project_path
 from agent_port.adapters.restore_support import apply_append_only_jsonl, merge_jsonl
 from agent_port.application.backup import BackupService
 from agent_port.application.registry import AdapterRegistry
@@ -21,7 +22,7 @@ from agent_port.application.restore import (
     RollbackService,
 )
 from agent_port.domain.errors import RestoreError
-from agent_port.domain.models import HarnessName
+from agent_port.domain.models import HarnessName, OperationKind
 from agent_port.infrastructure.path_mapping import PathMapper, parse_mapping
 from agent_port.presentation.cli import app
 
@@ -146,6 +147,7 @@ def test_codex_saved_plan_apply_verify_and_manual_rollback(
     result = RestoreApplyService().execute(plan_path, confirm_harness_closed=True)
     restored = destination / "sessions/2026/06/30/rollout-thread-1.jsonl"
     assert result.verification.valid is True
+
     assert restored.is_file()
     assert restored.stat().st_mtime_ns == source_mtime
     first = json.loads(restored.read_text(encoding="utf-8").splitlines()[0])
@@ -413,6 +415,16 @@ def test_unsupported_codex_migration_blocks_plan(codex_home: Path, tmp_path: Pat
 def test_claude_restore_maps_project_and_preserves_existing_session(
     claude_home: Path, tmp_path: Path
 ) -> None:
+    write_jsonl(
+        claude_home / "projects/-synthetic-project/session-1/subagents/agent-1.jsonl",
+        [
+            {
+                "type": "assistant",
+                "sessionId": "session-1",
+                "message": {"content": "subagent"},
+            }
+        ],
+    )
     archive = tmp_path / "claude.agentpack"
     BackupService().execute(claude_home, archive)
     source_project = Path(
@@ -448,10 +460,28 @@ def test_claude_restore_maps_project_and_preserves_existing_session(
     result = RestoreApplyService().execute(plan_path, confirm_harness_closed=True)
     restored = [path for path in destination.rglob("session-1.jsonl") if path.is_file()]
     assert len(restored) == 1
+    restored_subagent = destination / "projects" / encode_project_path(str(destination_project))
+    assert (restored_subagent / "session-1/subagents/agent-1.jsonl").is_file()
     first = json.loads(restored[0].read_text().splitlines()[0])
     assert first["cwd"] == str(destination_project)
     assert (destination / "projects/-existing/session-2.jsonl").is_file()
     assert result.verification.valid is True
+
+    repeated_plan_path = tmp_path / "claude-repeat-plan.json"
+    repeated = RestorePlanService().execute(
+        archive,
+        repeated_plan_path,
+        destination=destination,
+        destination_home=destination.parent,
+        mapping_values=[f"{source_project}={destination_project}"],
+    )
+    assert repeated.ready, repeated.conflicts
+    assert all(operation.kind is OperationKind.SKIP for operation in repeated.operations)
+    assert (
+        RestoreApplyService()
+        .execute(repeated_plan_path, confirm_harness_closed=True)
+        .verification.valid
+    )
 
 
 @pytest.mark.parametrize(

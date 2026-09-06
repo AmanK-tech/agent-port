@@ -77,7 +77,7 @@ def test_skill_documents_real_cli_and_mutation_guardrails() -> None:
 
 def test_package_and_module_versions_match() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    assert project["version"] == __version__ == "0.5.4"
+    assert project["version"] == __version__ == "0.5.5"
     assert "Development Status :: 3 - Alpha" in project["classifiers"]
     assert ArchiveManifest.model_fields["adapter_version"].default == __version__
     assert InspectionReport.model_fields["adapter_version"].default == __version__

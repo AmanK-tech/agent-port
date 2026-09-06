@@ -13,7 +13,7 @@ database, verification, or rollback logic in ad hoc scripts.
 1. Identify whether the user wants inspection, LAN transfer, backup, restore planning, apply,
    validation, or rollback.
 2. Confirm the source, archive, destination, and intended harness when relevant.
-3. Run `agent-port --version` before other commands and require `0.5.4` or newer in the `0.5.x`
+3. Run `agent-port --version` before other commands and require `0.5.5` or newer in the `0.5.x`
    series. If it is unavailable or incompatible, stop and explain that Agent Port must be installed
    or upgraded; never install or upgrade it automatically.
 4. Use explicit paths. Do not inspect unrelated home directories.

@@ -230,6 +230,30 @@ class AgentPackReader:
             raise ArchiveError(f"Invalid inventory document: {name}")
         return value
 
+    def read_repository_inventory(self, source: Path) -> dict[str, str]:
+        self.inspect(source)
+        with zipfile.ZipFile(source, "r") as archive:
+            if "repositories.json" not in archive.namelist():
+                return {}
+            try:
+                value = json.loads(archive.read("repositories.json"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                raise ArchiveError(
+                    f"Invalid repositories.json inventory document: {error}"
+                ) from error
+        if not isinstance(value, dict) or not isinstance(value.get("repositories"), list):
+            raise ArchiveError("Invalid repositories.json inventory document.")
+        result: dict[str, str] = {}
+        for item in value["repositories"]:
+            if not isinstance(item, dict):
+                raise ArchiveError("Invalid repository record in repositories.json.")
+            path = item.get("path")
+            fingerprint = item.get("fingerprint")
+            if not isinstance(path, str) or not isinstance(fingerprint, str):
+                raise ArchiveError("Repository records require path and fingerprint strings.")
+            result[path] = fingerprint
+        return result
+
     def materialize(self, source: Path, destination: Path) -> None:
         """Safely materialize verified native payloads without using ZipFile.extract."""
         self.inspect(source)

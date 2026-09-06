@@ -25,8 +25,8 @@ uv tool install agent-port
 agent-port --version
 ```
 
-Alternatively, use `pipx install agent-port`. If you downloaded the release wheel,
-use `uv tool install /path/to/agent_port-0.5.4-py3-none-any.whl`.
+Alternatively, use `pipx install agent-port`. If you downloaded a release wheel, install the
+downloaded file with `uv tool install /path/to/downloaded-wheel.whl`.
 
 Then install the plugin in the harness you use.
 
@@ -61,8 +61,10 @@ See [installation, updates, and removal](docs/plugins.md) for details.
    It receives and checks the archive in a private workspace under `~/Agent-Port/Migrations/`.
    Receiving the archive does not change your Codex or Claude Code data.
 3. **Review the restore plan:** confirm where your project folders live on the new computer.
-   Review missing projects, conversation conflicts, and any differing personal skills. A blocked
-   plan must be resolved before restoration can proceed.
+   Agent Port suggests a project mapping when it finds exactly one cloned Git repository with the
+   same origin remote, even when its folder path changed. Review and approve those suggestions,
+   then resolve any remaining missing projects, conversation conflicts, or differing personal
+   skills. A blocked plan must be resolved before restoration can proceed.
 4. **Approve and close the destination harness:** the plugin arms a temporary handoff. Quit Codex
    or Claude Code on the new computer. The worker waits for closure, backs up the destination,
    restores the data, and verifies the result before reporting success.
@@ -145,6 +147,8 @@ For local diagnostics, run `agent-port doctor ~/.codex --harness codex` or
   historical messages.
 - Existing destination data is checked for collisions. Differing skills require an explicit
   decision. Compatible Claude Code histories with append-only growth retain the longer history.
+- For Git-backed projects, a one-way origin fingerprint can suggest a unique cloned-project path;
+  remote URLs and credentials are not stored in the archive.
 - Authentication files, caches, logs, plugin-managed skills, and machine-specific runtime files
   are excluded. Reinstall managed plugins through their harness.
 - Inspection, backup, and restore work locally without uploading data. Only an explicit transfer
@@ -155,7 +159,7 @@ For local diagnostics, run `agent-port doctor ~/.codex --harness codex` or
 **Compatibility:** Codex SQLite restoration remains experimental and supports migration pairs
 39→39, 39→40, and 40→40. Claude Code restore requires a matching detected major/minor compatibility
 profile. Unknown schemas and incompatible profiles are blocked. LAN transfer supports Agent Port
-0.5.4 and newer within the 0.5.x series. These checks do not guarantee support for every future
+0.5.5 and newer within the 0.5.x series. These checks do not guarantee support for every future
 harness version.
 
 ## Contributing and technical documentation

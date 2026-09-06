@@ -204,7 +204,13 @@ def destination_session_ids(destination: Path, harness: str) -> dict[str, Path]:
 def destination_session_candidates(destination: Path, harness: str) -> dict[str, list[Path]]:
     identities: dict[str, list[Path]] = {}
     if harness == "claude-code":
-        transcripts = claude_transcript_candidates(destination)
+        # Subagents may share their parent's sessionId. They are reconciled by
+        # their path beneath that conversation, not as competing conversations.
+        transcripts = [
+            path
+            for path in claude_transcript_candidates(destination)
+            if len(path.relative_to(destination / "projects").parts) == 2
+        ]
     else:
         transcripts = []
         for root in (destination / "sessions", destination / "archived_sessions"):

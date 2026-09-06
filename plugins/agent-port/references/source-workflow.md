@@ -1,6 +1,6 @@
 # Source-machine workflow
 
-1. Run `agent-port --version` and require `0.5.4` or newer in the `0.5.x` series.
+1. Run `agent-port --version` and require `0.5.5` or newer in the `0.5.x` series.
 2. Inspect only the requested harness home.
 3. Inspect skill ownership and explain exclusions.
 4. For a normal backup, create the requested `.agentpack` at an explicit path and inspect it.

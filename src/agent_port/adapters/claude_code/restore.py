@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from agent_port.adapters.claude_code.paths import encode_project_path, project_container_paths
 from agent_port.adapters.restore_support import (
     apply_append_only_jsonl,
     classify_append_only_jsonl,
@@ -110,6 +111,9 @@ def plan_restore(context: RestorePlanningContext) -> AdapterRestorePlan:
 
     destination_ids = destination_session_candidates(context.destination, "claude-code")
     project_destinations = {project.source: project.destination for project in context.projects}
+    # Reconstruct this even for older archives whose payload inventory could have
+    # assigned the last-seen cwd to every member of a native project container.
+    container_paths = project_container_paths(context.extracted / "native/sessions/projects")
     for payload in context.payloads:
         if payload.role.value in {"skill", "database"}:
             continue
@@ -119,15 +123,29 @@ def plan_restore(context: RestorePlanningContext) -> AdapterRestorePlan:
         original_parts = payload.original_path.split("/")
         destination_relative = payload.original_path
         if len(original_parts) >= 3 and original_parts[0] == "projects":
-            mapped_project = (
-                project_destinations.get(payload.project_path, payload.project_path)
-                if payload.project_path
-                else None
-            )
-            if mapped_project:
-                original_parts[1] = encode_project_path(mapped_project)
-                destination_relative = "/".join(original_parts)
+            source_project = container_paths.get(original_parts[1])
+            if source_project is None:
+                conflicts.append(
+                    RestoreConflict(
+                        kind="ambiguous-source-project-container",
+                        identity=original_parts[1],
+                        destination=str(context.destination),
+                        message=(
+                            "Cannot identify the source project container from transcript metadata."
+                        ),
+                    )
+                )
+                continue
+            mapped_project = project_destinations.get(source_project, source_project)
+            original_parts[1] = encode_project_path(mapped_project)
+            destination_relative = "/".join(original_parts)
         destination = context.destination / Path(*destination_relative.split("/"))
+        if len(original_parts) > 3 and original_parts[0] == "projects":
+            parents = destination_ids.get(original_parts[2], [])
+            if len(parents) == 1:
+                # Keep subagents and tool results beside an existing parent even
+                # when the parent was already stored in a different container.
+                destination = parents[0].with_suffix("") / Path(*original_parts[3:])
         expected: str | None
         if payload.role.value == "transcript":
             transformed = transform_jsonl(source, "claude-code", mapper)
@@ -147,7 +165,11 @@ def plan_restore(context: RestorePlanningContext) -> AdapterRestorePlan:
                 )
                 continue
             identity = next(iter(identities))
-            candidates = destination_ids.get(identity, [])
+            candidates = (
+                destination_ids.get(identity, [])
+                if len(original_parts) == 3
+                else ([destination] if destination.is_file() else [])
+            )
             if len(candidates) > 1:
                 conflicts.append(
                     RestoreConflict(
@@ -325,10 +347,6 @@ def verify_restore(plan: RestorePlan) -> VerificationReport:
             )
     checks.append("Claude Code transcript JSONL validated")
     return VerificationReport(valid=valid, checks=checks, diagnostics=diagnostics)
-
-
-def encode_project_path(value: str) -> str:
-    return value.replace("\\", "-").replace("/", "-").replace(":", "-")
 
 
 def _source_compatibility_profiles(

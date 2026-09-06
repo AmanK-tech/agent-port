@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 import agent_port.application.verification as verification_module
+from agent_port.adapters.claude_code.paths import encode_project_path
 from agent_port.application.backup import BackupService
 from agent_port.application.handoff import handoff_status_path, write_handoff_status
 from agent_port.application.restore import RestoreApplyService, RestorePlanService, RollbackService
@@ -30,16 +33,22 @@ def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
     path.write_text("".join(json.dumps(item) + "\n" for item in records), encoding="utf-8")
 
 
-def _apply_claude(claude_home: Path, tmp_path: Path) -> tuple[Path, Path, Path]:
+def _apply_claude(
+    claude_home: Path, tmp_path: Path, *, native_container: bool = False
+) -> tuple[Path, Path, Path]:
     sidecar = (
         claude_home / "projects/-synthetic-project/session-1/tool-results/synthetic-result.txt"
     )
     sidecar.parent.mkdir(parents=True)
     sidecar.write_text("synthetic tool result", encoding="utf-8")
     archive = tmp_path / "source.agentpack"
-    BackupService().execute(claude_home, archive)
     source_transcript = claude_home / "projects/-synthetic-project/session-1.jsonl"
     source_record = json.loads(source_transcript.read_text(encoding="utf-8").splitlines()[0])
+    if native_container:
+        container = source_transcript.parent.with_name(encode_project_path(source_record["cwd"]))
+        source_transcript.parent.rename(container)
+        source_transcript = container / source_transcript.name
+    BackupService().execute(claude_home, archive)
     destination = tmp_path / "destination" / ".claude"
     project = tmp_path / "destination-project"
     project.mkdir()
@@ -156,6 +165,23 @@ def test_initial_verification_is_immutable_after_later_activity(
     assert current.initial_verification_path == str(initial_path)
     assert initial_path.read_bytes() == initial_evidence
     assert (run_directory / "current-verification.json").is_file()
+
+
+def test_missing_initial_snapshot_is_reported_without_inventing_a_timeline(
+    claude_home: Path, tmp_path: Path
+) -> None:
+    _plan, run_directory, restored = _apply_claude(claude_home, tmp_path)
+    (run_directory / "initial-verification.json").unlink()
+    restored.unlink()
+
+    current = RestoreVerificationService().execute(run_directory)
+
+    assert current.status is RestoreVerificationState.CHANGED
+    assert current.restore_completed_safely is True
+    assert current.initial_verification_status is None
+    assert current.initial_verification_path is None
+    assert "initial-verification-unavailable" in {item.code for item in current.diagnostics}
+    assert not (run_directory / "initial-verification.json").exists()
 
 
 def test_verifier_detects_truncated_transcript_and_changed_skill(
@@ -409,6 +435,136 @@ def test_verifier_reports_rolled_back_run(claude_home: Path, tmp_path: Path) -> 
     assert verified.status is RestoreVerificationState.ROLLED_BACK
     assert verified.restore_completed_safely is True
     assert verified.current_data_intact is False
+    assert verified.valid is False
+    assert verified.success_gate_passed is False
+    assert verified.counts.all_expected_verified is True
+    assert all(
+        value == 0
+        for name, value in verified.counts.model_dump().items()
+        if name.startswith(("expected_", "verified_"))
+    )
+
+
+def test_later_failed_restore_preserves_earlier_run(
+    claude_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan_path, first_run, restored = _apply_claude(claude_home, tmp_path)
+    original_bytes = restored.read_bytes()
+    source = claude_home / "projects/-synthetic-project/session-1.jsonl"
+    with source.open("a", encoding="utf-8") as output:
+        output.write('{"type":"assistant","sessionId":"session-1","later":true}\n')
+    archive = tmp_path / "later.agentpack"
+    BackupService().execute(claude_home, archive)
+    first_plan = verification_module._load_plan(plan_path)
+    later_path = tmp_path / "later-plan.json"
+    later = RestorePlanService().execute(
+        archive,
+        later_path,
+        destination=Path(first_plan.destination),
+        destination_home=Path(first_plan.destination_home),
+        mapping_values=[f"{item.source}={item.destination}" for item in first_plan.mappings],
+    )
+    original = RestoreVerificationService._verify_current_data
+
+    def incomplete(self: RestoreVerificationService, *args: object, **kwargs: object):
+        intact, counts = original(self, *args, **kwargs)  # type: ignore[arg-type]
+        return intact, counts.model_copy(update={"verified_conversations": 0})
+
+    with monkeypatch.context() as patch:
+        patch.setattr(RestoreVerificationService, "_verify_current_data", incomplete)
+        with pytest.raises(RestoreError, match="Initial closed-harness verification failed"):
+            RestoreApplyService().execute(later_path, confirm_harness_closed=True)
+
+    assert restored.read_bytes() == original_bytes
+    assert RestoreVerificationService().execute(first_run).success_gate_passed
+    assert RestoreVerificationService().execute(Path(later.run_directory)).status is (
+        RestoreVerificationState.ROLLED_BACK
+    )
+
+
+def test_overlapping_restores_cannot_erase_each_others_transcripts(
+    claude_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan_path, first_run, _restored = _apply_claude(claude_home, tmp_path)
+    RollbackService().execute(first_run, confirm_harness_closed=True)
+    template = verification_module._load_plan(plan_path)
+    plans = []
+    for index in range(2):
+        path = tmp_path / f"overlap-{index}.json"
+        plan = RestorePlanService().execute(
+            Path(template.archive.path),
+            path,
+            destination=Path(template.destination),
+            destination_home=Path(template.destination_home),
+            mapping_values=[f"{item.source}={item.destination}" for item in template.mappings],
+        )
+        plans.append((path, plan))
+    journal_ready = threading.Event()
+    resume = threading.Event()
+    prepare = RestoreApplyService._prepare_journal
+
+    def paused_prepare(plan, run_directory, journal, journal_path):
+        prepare(plan, run_directory, journal, journal_path)
+        if plan.plan_id == plans[0][1].plan_id:
+            journal_ready.set()
+            assert resume.wait(5), "Timed out waiting for the overlapping restore"
+
+    monkeypatch.setattr(RestoreApplyService, "_prepare_journal", staticmethod(paused_prepare))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(
+            RestoreApplyService().execute, plans[0][0], confirm_harness_closed=True
+        )
+        try:
+            assert journal_ready.wait(5)
+            with pytest.raises(RestoreError, match="Another restore or rollback"):
+                RestoreApplyService().execute(plans[1][0], confirm_harness_closed=True)
+        finally:
+            resume.set()
+        result = first.result(timeout=5)
+    assert RestoreVerificationService().execute(Path(result.run_directory)).success_gate_passed
+    assert not Path(plans[1][1].run_directory).exists()
+
+
+@pytest.mark.parametrize("legacy_counts", [False, True])
+def test_claude_verification_counts_containers_with_shared_and_multiple_cwds(
+    claude_home: Path, tmp_path: Path, legacy_counts: bool
+) -> None:
+    # A native container can include several working directories, and the same
+    # working directory can appear in more than one native container.
+    for relative, identity, project in [
+        ("-synthetic-project/session-2.jsonl", "session-2", tmp_path / "other-project"),
+        ("-second-container/session-3.jsonl", "session-3", tmp_path / "project"),
+    ]:
+        project.mkdir(exist_ok=True)
+        _write_jsonl(
+            claude_home / "projects" / relative,
+            [{"type": "system", "sessionId": identity, "cwd": str(project), "version": "2.3.4"}],
+        )
+    plan_path, run_directory, restored = _apply_claude(claude_home, tmp_path, native_container=True)
+    assert restored.parent.name == encode_project_path(str(tmp_path / "destination-project"))
+    assert (restored.parent / "session-2.jsonl").is_file()
+    assert (restored.parent / "session-1/tool-results/synthetic-result.txt").is_file()
+    if legacy_counts:
+        plan = verification_module._load_plan(plan_path)
+        plan = plan.model_copy(update={"archive": plan.archive.model_copy(update={"counts": None})})
+        plan = plan.model_copy(update={"plan_digest": verification_module._plan_digest(plan)})
+        (run_directory / "plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
+        Path(plan.archive.path).unlink()
+
+    verified = RestoreVerificationService().execute(run_directory)
+
+    assert verified.success_gate_passed is True
+    assert verified.counts.expected_projects == verified.counts.verified_projects == 2
+    assert verified.counts.expected_conversations == verified.counts.verified_conversations == 3
+    assert (
+        verified.counts.expected_transcript_files == verified.counts.verified_transcript_files == 3
+    )
+
+    restored.unlink()
+    changed = RestoreVerificationService().execute(run_directory)
+    assert changed.status is RestoreVerificationState.CHANGED
+    assert changed.counts.verified_projects == 1
+    assert changed.counts.verified_conversations == 2
 
 
 def test_verifier_detects_incomplete_codex_database_registration(

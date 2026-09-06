@@ -7,7 +7,7 @@ description: Verify that an Agent Port restore completed safely and that its mig
 
 Read [the safety contract](../../references/safety-contract.md).
 
-Run `agent-port --version` first and require `0.5.4` or newer in the `0.5.x` series. Verification
+Run `agent-port --version` first and require `0.5.5` or newer in the `0.5.x` series. Verification
 does not mutate harness data; it records its result in retained migration evidence. Use the exact
 run directory from the final saved plan or completed handoff:
 

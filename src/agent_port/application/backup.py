@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agent_port.adapters.claude_code.paths import project_container_paths
 from agent_port.application.registry import AdapterRegistry
 from agent_port.domain.errors import BackupError
 from agent_port.domain.models import (
@@ -93,9 +94,23 @@ class BackupService:
             project_values = report.projects if "sessions" in include else []
             (staging / "projects.json").write_bytes(
                 canonical_json(
-                    {"projects": [item.model_dump(mode="json") for item in project_values]}
+                    {
+                        "projects": [
+                            item.model_dump(mode="json", exclude={"repository_fingerprint"})
+                            for item in project_values
+                        ]
+                    }
                 )
             )
+            repositories = [
+                {"path": item.path, "fingerprint": item.repository_fingerprint}
+                for item in project_values
+                if item.repository_fingerprint
+            ]
+            if repositories:
+                (staging / "repositories.json").write_bytes(
+                    canonical_json({"repositories": repositories})
+                )
             (staging / "skills.json").write_bytes(
                 canonical_json(
                     {
@@ -145,15 +160,7 @@ class BackupService:
             return records
         project_by_container: dict[str, str] = {}
         if harness == "claude-code":
-            projects_root = native / "sessions" / "projects"
-            if projects_root.is_dir():
-                for transcript in projects_root.rglob("*.jsonl"):
-                    summary = inspect_jsonl(transcript, harness)
-                    transcript_relative = transcript.relative_to(projects_root)
-                    if transcript_relative.parts and len(summary.project_paths) == 1:
-                        project_by_container[transcript_relative.parts[0]] = next(
-                            iter(summary.project_paths)
-                        )
+            project_by_container = project_container_paths(native / "sessions" / "projects")
         for path in stage_entries(native):
             member = path.relative_to(staging).as_posix()
             relative_name = path.relative_to(native).as_posix()

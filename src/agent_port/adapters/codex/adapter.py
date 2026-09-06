@@ -27,6 +27,7 @@ from agent_port.domain.ports import AdapterRestorePlan, BackupCollection, Restor
 from agent_port.infrastructure.filesystem.copying import copy_tree_safely, stable_copy
 from agent_port.infrastructure.filesystem.jsonl import inspect_jsonl
 from agent_port.infrastructure.filesystem.skills import copy_skill, inspect_skill, scan_skill_root
+from agent_port.infrastructure.repositories import repository_fingerprint
 from agent_port.infrastructure.versions import compatibility_profiles
 
 
@@ -147,6 +148,7 @@ class CodexAdapter:
                 conversation_count=sum(
                     1 for project_path in thread_projects.values() if project_path == path
                 ),
+                repository_fingerprint=repository_fingerprint(Path(path)),
             )
             for path in sorted(project_paths)
         ]

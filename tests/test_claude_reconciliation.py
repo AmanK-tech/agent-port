@@ -94,6 +94,29 @@ def test_destination_ahead_session_is_preserved(claude_home: Path, tmp_path: Pat
     assert (destination / "projects/-existing/session-1.jsonl").read_bytes() == before
 
 
+def test_subagent_and_tool_result_follow_existing_parent_container(
+    claude_home: Path, tmp_path: Path
+) -> None:
+    child = "session-1/subagents/agent-1.jsonl"
+    _write_jsonl(
+        claude_home / "projects/-synthetic-project" / child,
+        [{"type": "assistant", "sessionId": "session-1", "message": {"content": "child"}}],
+    )
+    result_path = "session-1/tool-results/result.txt"
+    result = claude_home / "projects/-synthetic-project" / result_path
+    result.parent.mkdir(parents=True)
+    result.write_text("tool output", encoding="utf-8")
+    records = _source_records(claude_home, tmp_path / "destination-project")
+    plan_path, destination, plan = _plan_with_existing_session(claude_home, tmp_path, records)
+
+    assert plan.ready, plan.conflicts
+    RestoreApplyService().execute(plan_path, confirm_harness_closed=True)
+
+    assert (destination / "projects/-existing" / child).is_file()
+    assert (destination / "projects/-existing" / result_path).read_text() == "tool output"
+    assert len(list(destination.rglob("session-1.jsonl"))) == 1
+
+
 def test_divergent_and_malformed_session_histories_block(claude_home: Path, tmp_path: Path) -> None:
     destination_project = tmp_path / "destination-project"
     records = _source_records(claude_home, destination_project)

@@ -44,9 +44,11 @@ plans, reloads the final plan through `restore plan-info`, and asks only for act
 differing-skill decisions. It then arms the handoff, asks the user only to quit, and verifies the
 completed migration automatically after restart.
 
-The pairing flow is same-LAN only. If discovery is blocked, use the `--host` and `--port` endpoint
-printed by `transfer send`. Ad hoc SSH/SFTP, relays, cloud transfer, firewall changes, and
-cross-harness session conversion are not supported.
+If a project was cloned into a different folder on the destination, Agent Port matches its origin
+remote and suggests a `SOURCE=DESTINATION` mapping when the match is unique. Approve the
+suggestion before regenerating the plan. The pairing flow is same-LAN only. If discovery is
+blocked, use the `--host` and `--port` endpoint printed by `transfer send`. Ad hoc SSH/SFTP,
+relays, cloud transfer, firewall changes, and cross-harness session conversion are not supported.
 
 ## Local development
 
@@ -80,5 +82,6 @@ explicitly. The plugin will never do this automatically.
 
 The plugin contains instructions, references, images, and manifests only. It has no hook, MCP
 server, app integration, installer, or bundled executable. The CLI may launch one temporary,
-expiring restore handoff worker after explicit approval. All destination mutation remains in the
-schema-gated CLI after saved-plan, preflight, and process-closure checks.
+expiring restore handoff worker after explicit approval. Git origin matching uses one-way
+fingerprints only; remote URLs and credentials are not archived. All destination mutation remains
+in the schema-gated CLI after saved-plan, preflight, and process-closure checks.

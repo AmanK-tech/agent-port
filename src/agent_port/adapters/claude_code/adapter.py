@@ -24,6 +24,7 @@ from agent_port.domain.ports import AdapterRestorePlan, BackupCollection, Restor
 from agent_port.infrastructure.filesystem.copying import copy_tree_safely
 from agent_port.infrastructure.filesystem.jsonl import JsonlSummary, inspect_jsonl
 from agent_port.infrastructure.filesystem.skills import copy_skill, scan_skill_root
+from agent_port.infrastructure.repositories import repository_fingerprint
 from agent_port.infrastructure.versions import compatibility_profiles
 
 CLAUDE_NOISE_NAMES = frozenset({".ds_store", "thumbs.db", "desktop.ini"})
@@ -149,6 +150,7 @@ class ClaudeCodeAdapter:
                             path=path,
                             exists=Path(path).is_dir(),
                             conversation_count=conversation_count,
+                            repository_fingerprint=repository_fingerprint(Path(path)),
                         )
                         for path in sorted(paths)
                     )

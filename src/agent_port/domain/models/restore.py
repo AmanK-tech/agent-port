@@ -67,6 +67,7 @@ class ProjectMapping(StrictModel):
     exists: bool
     conversation_count: int = Field(default=0, ge=0)
     accepted_unmapped: bool = False
+    repository_fingerprint: str | None = None
 
 
 class RestorePlan(StrictModel):

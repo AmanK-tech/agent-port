@@ -49,6 +49,7 @@ from agent_port.domain.ports import RestorePlanningContext
 from agent_port.infrastructure.archive import AgentPackReader
 from agent_port.infrastructure.archive.common import canonical_json, describe_path, stage_entries
 from agent_port.infrastructure.filesystem.jsonl import inspect_jsonl
+from agent_port.infrastructure.filesystem.locking import restore_destination_lock
 from agent_port.infrastructure.path_mapping import (
     PathMapper,
     fingerprint_path,
@@ -56,6 +57,7 @@ from agent_port.infrastructure.path_mapping import (
     normalize,
     parse_mapping,
 )
+from agent_port.infrastructure.repositories import discover_repositories
 
 
 def _is_claude_transcript_member(relative_name: str) -> bool:
@@ -105,6 +107,17 @@ class RestorePlanService:
         projects_raw = self._reader.read_inventory(archive, "projects.json").get("projects", [])
         if not isinstance(projects_raw, list):
             raise RestoreError("Invalid projects inventory in archive.")
+        repository_fingerprints = self._reader.read_repository_inventory(archive)
+        projects_raw = [
+            (
+                {**value, "repository_fingerprint": repository_fingerprints[value["path"]]}
+                if isinstance(value, dict)
+                and isinstance(value.get("path"), str)
+                and value["path"] in repository_fingerprints
+                else value
+            )
+            for value in projects_raw
+        ]
         projects, path_conflicts = self._plan_projects(projects_raw, mapper, accepted)
         policies = self._parse_skill_policies(skill_conflicts or [])
         skills_inventory = self._reader.read_inventory(archive, "skills.json")
@@ -240,6 +253,7 @@ class RestorePlanService:
                         destination=source,
                         exists=False,
                         conversation_count=project.conversation_count,
+                        repository_fingerprint=project.repository_fingerprint,
                     )
                 )
                 continue
@@ -263,6 +277,7 @@ class RestorePlanService:
                     exists=Path(destination).is_dir(),
                     conversation_count=project.conversation_count,
                     accepted_unmapped=accepted_path,
+                    repository_fingerprint=project.repository_fingerprint,
                 )
             )
         return projects, conflicts
@@ -410,6 +425,40 @@ class RestorePlanService:
         return list(by_path.values())
 
 
+def _suggest_repository_mappings(
+    plan: RestorePlan, existing: list[PathMapping]
+) -> list[PathMapping]:
+    """Suggest unique destination clones for otherwise-unmapped project paths."""
+    if not any(
+        project.repository_fingerprint
+        and not project.exists
+        and not project.accepted_unmapped
+        and project.destination == project.source
+        for project in plan.projects
+    ):
+        return []
+    candidates = discover_repositories(Path(plan.destination_home))
+    if not candidates:
+        return []
+    by_fingerprint: dict[str, list[Path]] = {}
+    for candidate in candidates:
+        by_fingerprint.setdefault(candidate.fingerprint, []).append(candidate.path)
+    existing_sources = {normalize(mapping.source) for mapping in existing}
+    suggestions: list[PathMapping] = []
+    for project in plan.projects:
+        if project.exists or project.accepted_unmapped or project.destination != project.source:
+            continue
+        if not project.repository_fingerprint:
+            continue
+        matches = by_fingerprint.get(project.repository_fingerprint, [])
+        if len(matches) != 1 or normalize(project.source) in existing_sources:
+            continue
+        mapping = PathMapping(source=project.source, destination=str(matches[0]))
+        if mapping not in suggestions:
+            suggestions.append(mapping)
+    return suggestions
+
+
 class RestorePlanInfoService:
     def __init__(self, reader: AgentPackReader | None = None) -> None:
         self._reader = reader or AgentPackReader()
@@ -441,6 +490,7 @@ class RestorePlanInfoService:
                 )
             ):
                 suggested.append(PathMapping(source=source_home, destination=plan.destination_home))
+        suggested.extend(_suggest_repository_mappings(plan, suggested))
         operation_counts = dict(
             sorted(Counter(operation.kind.value for operation in plan.operations).items())
         )
@@ -526,7 +576,20 @@ class RestoreApplyService:
     ) -> RestoreResult:
         if not confirm_harness_closed:
             raise RestoreError("Apply requires --confirm-harness-closed.")
+        destination = _load_plan(plan_path).destination
+        with restore_destination_lock(Path(destination)):
+            return self._execute(plan_path, destination, register_projects, closure_guard)
+
+    def _execute(
+        self,
+        plan_path: Path,
+        locked_destination: str,
+        register_projects: bool,
+        closure_guard: Callable[[], None] | None,
+    ) -> RestoreResult:
         plan = RestorePreflightService(self._reader).execute(plan_path)
+        if plan.destination != locked_destination:
+            raise RestoreError("Restore destination changed while acquiring its lock.")
         archive = Path(plan.archive.path)
         if closure_guard is not None:
             closure_guard()
@@ -616,8 +679,14 @@ class RestoreApplyService:
             if closure_guard is not None:
                 closure_guard()
             if not initial_verification.success_gate_passed:
+                details = "; ".join(
+                    diagnostic.message
+                    for diagnostic in initial_verification.diagnostics
+                    if diagnostic.severity is Severity.ERROR
+                )
                 raise RestoreError(
                     "Initial closed-harness verification failed; automatic rollback started."
+                    + (f" {details}" if details else "")
                 )
             if closure_guard is not None:
                 closure_guard()
@@ -702,16 +771,34 @@ class RollbackService:
     def execute(self, run_directory: Path, confirm_harness_closed: bool) -> RollbackResult:
         if not confirm_harness_closed:
             raise RestoreError("Rollback requires --confirm-harness-closed.")
-        return self._execute(run_directory.expanduser().resolve(), enforce_postconditions=True)
+        run_directory = run_directory.expanduser().resolve()
+        journal = self._load_journal(run_directory)
+        with restore_destination_lock(Path(journal.destination)):
+            return self._execute(
+                run_directory, enforce_postconditions=True, locked_destination=journal.destination
+            )
 
-    def _execute(self, run_directory: Path, enforce_postconditions: bool) -> RollbackResult:
+    @staticmethod
+    def _load_journal(run_directory: Path) -> RollbackJournal:
         journal_path = run_directory / "journal.json"
         if not journal_path.is_file():
             raise RestoreError(f"Rollback journal does not exist: {journal_path}")
         try:
-            journal = RollbackJournal.model_validate_json(journal_path.read_bytes())
+            return RollbackJournal.model_validate_json(journal_path.read_bytes())
         except (OSError, ValidationError) as error:
             raise RestoreError(f"Invalid rollback journal: {error}") from error
+
+    def _execute(
+        self,
+        run_directory: Path,
+        enforce_postconditions: bool,
+        locked_destination: str | None = None,
+    ) -> RollbackResult:
+        # Automatic rollback runs inside the apply service's destination lock.
+        journal_path = run_directory / "journal.json"
+        journal = self._load_journal(run_directory)
+        if locked_destination is not None and journal.destination != locked_destination:
+            raise RestoreError("Rollback destination changed while acquiring its lock.")
         if journal.rolled_back:
             return RollbackResult(
                 run_directory=str(run_directory), restored=0, already_rolled_back=True

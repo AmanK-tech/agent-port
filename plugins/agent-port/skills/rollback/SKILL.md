@@ -7,7 +7,7 @@ description: Safely undo an Agent Port restore from its retained run directory. 
 
 Read [the safety contract](../../references/safety-contract.md).
 
-Run `agent-port --version` first and require `0.5.4` or newer in the `0.5.x` series. Require an
+Run `agent-port --version` first and require `0.5.5` or newer in the `0.5.x` series. Require an
 explicit rollback request and the exact retained run directory. Never guess a run directory or
 delete restored files manually.
 

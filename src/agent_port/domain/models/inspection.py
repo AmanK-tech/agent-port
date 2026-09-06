@@ -20,6 +20,7 @@ class ProjectRecord(StrictModel):
     path: str
     exists: bool
     conversation_count: int = 0
+    repository_fingerprint: str | None = None
 
 
 class SkillRecord(StrictModel):

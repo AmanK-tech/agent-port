@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ from typer.testing import CliRunner
 
 from agent_port.application.backup import BackupService
 from agent_port.application.migration import MigrationWorkspaceService, load_migration_document
+from agent_port.application.restore import RestoreApplyService
 from agent_port.application.transfer import TransferSendService
 from agent_port.domain.models import CountSummary, TransferOffer, TransferSendResult
 from agent_port.presentation.cli import app
@@ -119,6 +122,157 @@ def test_blocked_plan_is_saved_with_status_and_final_plan_info_is_canonical(
     document = load_migration_document(Path(prepared.workspace))
     assert document.current_plan == ready_payload["plan_path"]
     assert document.run_directory == ready_payload["run_directory"]
+
+
+def test_plan_suggests_unique_cloned_repository_mapping(claude_home: Path, tmp_path: Path) -> None:
+    source_project = tmp_path / "old-machine" / "workspace" / "agent-port"
+    source_project.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(source_project), "init", "-q"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source_project),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:AmanK-tech/agent-port.git",
+        ],
+        check=True,
+    )
+    _write_jsonl(
+        claude_home / "projects/-synthetic-project/session-1.jsonl",
+        [
+            {
+                "type": "system",
+                "sessionId": "session-1",
+                "cwd": str(source_project),
+                "version": "2.3.4",
+            },
+            {"type": "assistant", "sessionId": "session-1", "message": {"content": "hello"}},
+        ],
+    )
+    archive = tmp_path / "source.agentpack"
+    BackupService().execute(claude_home, archive)
+    shutil.rmtree(source_project)
+
+    destination_home = tmp_path / "new-machine"
+    destination = destination_home / ".claude"
+    destination_project = destination_home / "code" / "agent-port"
+    destination_project.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(destination_project), "init", "-q"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(destination_project),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/AmanK-tech/agent-port.git",
+        ],
+        check=True,
+    )
+    _write_jsonl(
+        destination / "projects/-existing/seed.jsonl",
+        [
+            {
+                "type": "system",
+                "sessionId": "seed",
+                "cwd": str(destination_project),
+                "version": "2.3.9",
+            }
+        ],
+    )
+    runner = CliRunner()
+    blocked = runner.invoke(
+        app,
+        [
+            "restore",
+            "plan",
+            str(archive),
+            "--output",
+            str(tmp_path / "cloned-repo-blocked-plan.json"),
+            "--destination",
+            str(destination),
+            "--destination-home",
+            str(destination_home),
+            "--format",
+            "json",
+        ],
+    )
+    assert blocked.exit_code == 1, blocked.output
+    payload = json.loads(blocked.output)
+    assert {item["source"]: item["destination"] for item in payload["suggested_mappings"]}[
+        str(source_project)
+    ] == str(destination_project)
+    assert any(item["kind"] == "unmapped-project" for item in payload["blockers"])
+
+    ambiguous_project = destination_home / "other-code" / "agent-port"
+    ambiguous_project.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(ambiguous_project), "init", "-q"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(ambiguous_project),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/AmanK-tech/agent-port.git",
+        ],
+        check=True,
+    )
+    ambiguous = runner.invoke(
+        app,
+        [
+            "restore",
+            "plan",
+            str(archive),
+            "--output",
+            str(tmp_path / "cloned-repo-ambiguous-plan.json"),
+            "--destination",
+            str(destination),
+            "--destination-home",
+            str(destination_home),
+            "--format",
+            "json",
+        ],
+    )
+    assert ambiguous.exit_code == 1, ambiguous.output
+    assert str(source_project) not in {
+        item["source"] for item in json.loads(ambiguous.output)["suggested_mappings"]
+    }
+
+    ready = runner.invoke(
+        app,
+        [
+            "restore",
+            "plan",
+            str(archive),
+            "--output",
+            str(tmp_path / "cloned-repo-ready-plan.json"),
+            "--destination",
+            str(destination),
+            "--destination-home",
+            str(destination_home),
+            "--map",
+            f"{source_project}={destination_project}",
+            "--format",
+            "json",
+        ],
+    )
+    assert ready.exit_code == 0, ready.output
+    assert json.loads(ready.output)["status"] == "ready"
+    result = RestoreApplyService().execute(
+        tmp_path / "cloned-repo-ready-plan.json", confirm_harness_closed=True
+    )
+    restored = list(destination.rglob("session-1.jsonl"))
+    assert len(restored) == 1
+    assert json.loads(restored[0].read_text(encoding="utf-8").splitlines()[0])["cwd"] == str(
+        destination_project
+    )
+    assert result.verification.valid is True
 
 
 def test_canonical_plugin_commands_have_the_documented_options() -> None:

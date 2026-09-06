@@ -9,8 +9,8 @@ Read [the safety contract](../../references/safety-contract.md) before acting. D
 this is the source or destination stage. Never imply that Codex sessions can become Claude Code
 sessions, or the reverse.
 
-Run `agent-port --version` and require `0.5.4` or newer in the `0.5.x` series. If missing or
-incompatible, stop and show `uv tool install "agent-port>=0.5.4,<0.6"` or the documented `pipx`
+Run `agent-port --version` and require `0.5.5` or newer in the `0.5.x` series. If missing or
+incompatible, stop and show `uv tool install agent-port` or the documented `pipx`
 alternative; never install or upgrade automatically.
 
 Follow [the source workflow](../../references/source-workflow.md) or
@@ -46,10 +46,13 @@ Create the auto-numbered plan with `agent-port restore plan ARCHIVE --destinatio
 --destination-home DESTINATION_HOME --format json`. Exit code 1 with `status: blocked` means the
 plan was saved successfully and needs decisions; it is not a command failure.
 
-If homes differ, present the single suggested root mapping and request approval. Regenerate with
-the approved `--map SOURCE=DESTINATION`; ask separately only for paths outside that root or actual
-differing eligible user skills. Never compare archive skills with plugin-managed or cached skills,
-or mention Claude `project_registration: false`.
+If homes differ, present the suggested root mapping and request approval. When a source project is
+a Git repository, Agent Port also suggests a mapping when it finds exactly one destination clone
+with the same origin remote, even if the clone has a different folder path. Present each suggested
+project mapping and request approval before using it. Regenerate with the approved `--map
+SOURCE=DESTINATION` values; ask separately only for ambiguous or non-Git project paths outside
+those mappings or actual differing eligible user skills. Never compare archive skills with
+plugin-managed or cached skills, or mention Claude `project_registration: false`.
 
 After each revision and immediately before handoff, reload the exact final file:
 

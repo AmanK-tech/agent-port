@@ -8,7 +8,7 @@ description: Inspect and create a verified native Agent Port backup for Codex or
 Read [the safety contract](../../references/safety-contract.md), then follow
 [the source workflow](../../references/source-workflow.md).
 
-Run `agent-port --version` first and require `0.5.4` or newer in the `0.5.x` series. If
+Run `agent-port --version` first and require `0.5.5` or newer in the `0.5.x` series. If
 unavailable, stop and provide the documented installation command without running it.
 
 Enforce this order:

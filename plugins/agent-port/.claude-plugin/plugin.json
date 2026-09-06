@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agent-port",
   "displayName": "Agent Port",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Safely transfer, back up, and restore native Codex and Claude Code sessions and user-owned skills.",
   "author": {
     "name": "AmanK-tech",
