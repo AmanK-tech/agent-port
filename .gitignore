@@ -1,4 +1,5 @@
 # Byte-compiled / optimized / DLL files
+.DS_Store
 __pycache__/
 *.py[codz]
 *$py.class
@@ -216,3 +217,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local migration state and generated release evidence
+*.agentpack
+.agent-port-runs/
+stress-report.json
+dist-python/
+dist-plugin/
+.package-venv/
+.release-venv/
+/AGENT_PORT_PROJECT_CONTEXT.md
+/Agent_Port_*.docx
+/Agent_Port_*.png
+/tools/build_code_flow_guide.py
+/tools/build_phase2_code_flow_guide.py

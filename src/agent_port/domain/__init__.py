@@ -1,0 +1,1 @@
+"""Harness-independent domain contracts."""

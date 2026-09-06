@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agent-port",
+  "owner": {
+    "name": "AmanK-tech"
+  },
+  "description": "Local-first migration tools for coding-agent sessions and skills.",
+  "plugins": [
+    {
+      "name": "agent-port",
+      "displayName": "Agent Port",
+      "source": "./plugins/agent-port",
+      "description": "Safely transfer, back up, and restore native Codex and Claude Code sessions and user-owned skills.",
+      "author": {
+        "name": "AmanK-tech"
+      },
+      "homepage": "https://github.com/AmanK-tech/agent-port#readme",
+      "repository": "https://github.com/AmanK-tech/agent-port",
+      "license": "MIT",
+      "category": "Productivity",
+      "tags": ["backup", "transfer", "migration", "developer-tools"],
+      "strict": true,
+      "defaultEnabled": true
+    }
+  ]
+}

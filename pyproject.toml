@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-port"
+version = "0.5.4"
+description = "Local-first backup and migration tooling for coding-agent harnesses"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "AmanK-tech" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: System :: Archiving :: Backup",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "asyncssh>=2.22,<3",
+  "cryptography>=49,<50",
+  "ifaddr>=0.2,<1",
+  "pydantic>=2.8,<3",
+  "psutil>=7,<8",
+  "pyyaml>=6.0,<7",
+  "typer>=0.12,<1",
+  "zeroconf>=0.147,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/AmanK-tech/agent-port"
+Issues = "https://github.com/AmanK-tech/agent-port/issues"
+Repository = "https://github.com/AmanK-tech/agent-port"
+
+[project.scripts]
+agent-port = "agent_port.presentation.cli:app"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.11,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=5,<7",
+  "ruff>=0.6,<1",
+  "types-psutil>=7,<8",
+  "types-pyyaml>=6.0,<7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_port"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/.agents",
+  "/.claude-plugin",
+  "/.github",
+  "/docs",
+  "/plugins",
+  "/skills",
+  "/src",
+  "/tests",
+  "/tools/validate_plugins.py",
+  "/tools/build_plugin.py",
+  "/LICENSE",
+  "/CHANGELOG.md",
+  "/README.md",
+  "/pyproject.toml",
+  "/uv.lock",
+]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["agent_port"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["agent_port"]

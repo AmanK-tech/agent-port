@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --locked --all-groups
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
+      - name: Run tests with coverage
+        env:
+          AGENT_PORT_STRESS_REPORT: ${{ runner.temp }}/agent-port-stress-report.json
+        run: uv run pytest --cov=agent_port
+
+  plugin-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: uv sync --locked --all-groups
+      - run: uv run python tools/validate_plugins.py
+      - name: Install harness validators
+        run: npm install --global @anthropic-ai/claude-code@2.1.196 @openai/codex@0.142.5
+      - run: claude plugin validate ./plugins/agent-port --strict
+      - name: Smoke-test Codex marketplace installation
+        env:
+          HOME: ${{ runner.temp }}/codex-home
+        run: |
+          mkdir -p "$HOME"
+          codex plugin marketplace add "$GITHUB_WORKSPACE"
+          codex plugin list | grep -F "agent-port"
+          codex plugin add agent-port@agent-port
+      - name: Smoke-test Claude Code marketplace installation
+        env:
+          HOME: ${{ runner.temp }}/claude-home
+        run: |
+          mkdir -p "$HOME"
+          claude plugin marketplace add "$GITHUB_WORKSPACE"
+          claude plugin install agent-port@agent-port --scope user
+          claude plugin list --json | grep -F '"id": "agent-port@agent-port"'
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv build
+      - run: uv run python tools/validate_plugins.py
+      - run: uv run python tools/build_plugin.py
+      - name: Verify source and wheel contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          sdist = next(Path("dist").glob("*.tar.gz"))
+          wheel = next(Path("dist").glob("*.whl"))
+
+          with tarfile.open(sdist) as archive:
+              names = archive.getnames()
+          assert any(name.endswith("/skills/agent-port/SKILL.md") for name in names)
+          assert any(name.endswith("/plugins/agent-port/.codex-plugin/plugin.json") for name in names)
+          assert any(name.endswith("/plugins/agent-port/.claude-plugin/plugin.json") for name in names)
+          assert any(name.endswith("/.agents/plugins/marketplace.json") for name in names)
+          assert any(name.endswith("/.claude-plugin/marketplace.json") for name in names)
+
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+          assert any(name == "agent_port/presentation/cli.py" for name in names)
+          assert not any(name.startswith(("tests/", "docs/", "skills/")) for name in names)
+          PY
+      - run: uv venv .package-venv
+      - run: uv pip install --python .package-venv/bin/python dist/*.whl
+      - name: Smoke-test installed CLI contract
+        run: |
+          EXPECTED_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          test "$(.package-venv/bin/agent-port --version)" = "$EXPECTED_VERSION"
+          HELP="$(.package-venv/bin/agent-port --help)"
+          for command in inspect transfer backup restore doctor skills; do
+            printf '%s\n' "$HELP" | grep -F "$command"
+          done

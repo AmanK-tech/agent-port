@@ -1,0 +1,20 @@
+{
+  "name": "agent-port",
+  "interface": {
+    "displayName": "Agent Port"
+  },
+  "plugins": [
+    {
+      "name": "agent-port",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-port"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

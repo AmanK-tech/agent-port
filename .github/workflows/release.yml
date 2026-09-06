@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked --all-groups
+      - run: uv run ruff check src tests tools/validate_plugins.py tools/build_plugin.py
+      - run: uv run ruff format --check src tests tools/validate_plugins.py tools/build_plugin.py
+      - run: uv run mypy src
+      - name: Run tests with coverage
+        env:
+          AGENT_PORT_STRESS_REPORT: ${{ runner.temp }}/agent-port-stress-report.json
+        run: uv run pytest --cov=agent_port
+      - run: uv run python tools/validate_plugins.py
+      - name: Check tag matches every release contract
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          test "$(uv run agent-port --version)" = "$VERSION"
+          test "$(python -c 'import json; print(json.load(open("plugins/agent-port/.codex-plugin/plugin.json"))["version"])')" = "$VERSION"
+          test "$(python -c 'import json; print(json.load(open("plugins/agent-port/.claude-plugin/plugin.json"))["version"])')" = "$VERSION"
+      - run: uv build --out-dir dist-python
+      - run: uv run python tools/build_plugin.py --output dist-plugin
+      - name: Verify release artifact contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          sdist = next(Path("dist-python").glob("*.tar.gz"))
+          wheel = next(Path("dist-python").glob("*.whl"))
+          plugin = next(Path("dist-plugin").glob("*.zip"))
+
+          with tarfile.open(sdist) as archive:
+              source_names = archive.getnames()
+          required_source = (
+              "/CHANGELOG.md",
+              "/README.md",
+              "/src/agent_port/application/transfer.py",
+              "/tests/test_transfer.py",
+              "/plugins/agent-port/.codex-plugin/plugin.json",
+              "/plugins/agent-port/.claude-plugin/plugin.json",
+          )
+          assert all(any(name.endswith(required) for name in source_names) for required in required_source)
+          assert not any(name.endswith(("/.DS_Store", "/stress-report.json", ".docx", ".agentpack")) for name in source_names)
+
+          with zipfile.ZipFile(wheel) as archive:
+              wheel_names = archive.namelist()
+          assert "agent_port/application/transfer.py" in wheel_names
+          assert "agent_port/infrastructure/transfer/protocol.py" in wheel_names
+          assert not any(name.startswith(("tests/", "docs/", "skills/", "plugins/")) for name in wheel_names)
+
+          with zipfile.ZipFile(plugin) as archive:
+              plugin_names = archive.namelist()
+          assert "agent-port/.codex-plugin/plugin.json" in plugin_names
+          assert "agent-port/.claude-plugin/plugin.json" in plugin_names
+          assert "agent-port/skills/migrate/SKILL.md" in plugin_names
+          assert not any(name.endswith((".agentpack", ".db", ".sqlite", ".docx")) for name in plugin_names)
+          PY
+      - run: uv venv .release-venv
+      - run: uv pip install --python .release-venv/bin/python dist-python/*.whl
+      - name: Smoke-test release wheel
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          test "$(.release-venv/bin/agent-port --version)" = "$VERSION"
+          uv pip check --python .release-venv/bin/python
+          HELP="$(.release-venv/bin/agent-port --help)"
+          for command in inspect transfer backup restore doctor skills; do
+            printf '%s\n' "$HELP" | grep -F "$command"
+          done
+      - name: Generate release checksums
+        run: sha256sum dist-python/* dist-plugin/*.zip > SHA256SUMS
+      - name: Publish Python package with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-python
+      - name: Create GitHub release and attach artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist-python/*
+            dist-plugin/*
+            SHA256SUMS
